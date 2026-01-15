@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { User, Building2, BookOpen, ChevronLeft, Image } from "lucide-react";
+import { Building2, BookOpen, ChevronLeft, Image } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { account, databases, DATABASE_ID, COLLECTIONS } from "@/integrations/appwrite/client";
 
 const StudentOnboarding = () => {
   const navigate = useNavigate();
@@ -46,62 +46,38 @@ const StudentOnboarding = () => {
 
   const checkUserAuth = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await account.get();
       if (!user) {
         navigate("/auth");
         return;
       }
 
       // Check if user role matches this onboarding type
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("role, onboarding_completed")
-        .eq("id", user.id)
-        .single();
+      try {
+        const profile = await databases.getDocument(
+          DATABASE_ID,
+          COLLECTIONS.profiles,
+          user.$id
+        );
 
-      // If profile doesn't exist yet, wait and try again
-      if (error || !profile) {
-        console.log("Profile not found, waiting for creation...");
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const { data: retryProfile } = await supabase
-          .from("profiles")
-          .select("role, onboarding_completed")
-          .eq("id", user.id)
-          .single();
-
-        if (!retryProfile) {
-          console.log("Profile still not found, allowing onboarding to continue");
-          return; // Allow onboarding to continue
-        }
-
-        // Use the retry profile for checks
-        if (retryProfile.onboarding_completed) {
-          navigate(retryProfile.role === "teacher" ? "/teacher/dashboard" : "/student/dashboard", { replace: true });
+        // If already completed onboarding, redirect to dashboard
+        if (profile.onboarding_completed) {
+          navigate(profile.role === "teacher" ? "/teacher/dashboard" : "/student/dashboard", { replace: true });
           return;
         }
 
-        if (retryProfile.role === "teacher") {
+        // If teacher trying to access student onboarding, redirect to teacher onboarding
+        if (profile.role === "teacher") {
           navigate("/teacher/onboarding", { replace: true });
           return;
         }
-        return;
-      }
-
-      // If already completed onboarding, redirect to dashboard
-      if (profile.onboarding_completed) {
-        navigate(profile.role === "teacher" ? "/teacher/dashboard" : "/student/dashboard", { replace: true });
-        return;
-      }
-
-      // If teacher trying to access student onboarding, redirect to teacher onboarding
-      if (profile.role === "teacher") {
-        navigate("/teacher/onboarding", { replace: true });
-        return;
+      } catch (error: any) {
+        console.log("Profile not found, allowing onboarding to continue");
+        // Allow onboarding to continue if profile doesn't exist
       }
     } catch (error) {
       console.error("Error checking user auth:", error);
-      // Allow onboarding to continue even if there's an error
+      navigate("/auth");
     }
   };
 
@@ -165,7 +141,7 @@ const StudentOnboarding = () => {
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await account.get();
 
       if (!user) {
         toast.error("User not authenticated");
@@ -173,46 +149,48 @@ const StudentOnboarding = () => {
         return;
       }
 
-      // Update user profile with onboarding data
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .update({
-          full_name: `${formData.firstName} ${formData.lastName}`,
-          avatar_url: formData.avatar,
-          phone: formData.telephone,
-          organization: formData.organizationName,
-          industry: formData.industry,
-          job_role: formData.role,
-          interests: formData.interests,
-          onboarding_completed: true,
-        })
-        .eq("id", user.id);
+      console.log("Updating profile for user:", user.$id);
 
-      if (profileError) throw profileError;
-
-      // Wait a moment to ensure database update is complete
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Verify the update was successful
-      const { data: profile, error: fetchError } = await supabase
-        .from("profiles")
-        .select("role, onboarding_completed")
-        .eq("id", user.id)
-        .single();
-
-      if (fetchError) throw fetchError;
-
-      if (!profile?.onboarding_completed) {
-        throw new Error("Onboarding update failed");
+      // Create full URL for avatar if it's a relative path
+      let avatarUrl = formData.avatar;
+      if (avatarUrl && !avatarUrl.startsWith('http')) {
+        avatarUrl = `${window.location.origin}${avatarUrl}`;
       }
+
+      // Only include fields that exist in our Appwrite schema
+      const updateData: Record<string, any> = {
+        full_name: `${formData.firstName} ${formData.lastName}`,
+        phone: formData.telephone,
+        school: formData.organizationName,
+        subjects: formData.interests.join(", "),
+        onboarding_completed: true,
+      };
+
+      // Only add avatar_url if it's a valid URL
+      if (avatarUrl && avatarUrl.startsWith('http')) {
+        updateData.avatar_url = avatarUrl;
+      }
+
+      console.log("Update data:", updateData);
+
+      // Update user profile with onboarding data using Appwrite
+      await databases.updateDocument(
+        DATABASE_ID,
+        COLLECTIONS.profiles,
+        user.$id,
+        updateData
+      );
+
+      console.log("Profile updated successfully");
 
       toast.success("Onboarding completed successfully!");
 
-      // Always redirect to student dashboard since this is StudentOnboarding
-      // If user is actually a teacher, they should have gone through TeacherOnboarding
+      // Redirect to student dashboard
       navigate("/student/dashboard", { replace: true });
     } catch (error: any) {
       console.error("Error completing onboarding:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
       toast.error("Failed to complete onboarding. Please try again.");
     } finally {
       setLoading(false);
@@ -399,7 +377,7 @@ const StudentOnboarding = () => {
               <div className="flex gap-3 pt-4">
                 <Button
                   onClick={handleNext}
-                  className="bg-[#006d2c] hover:bg-[#006d2c] text-black font-medium h-12 px-8"
+                  className="bg-[#006d2c] hover:bg-[#005523] text-white font-medium h-12 px-8"
                 >
                   Next
                 </Button>
@@ -478,7 +456,7 @@ const StudentOnboarding = () => {
                 </Button>
                 <Button
                   onClick={handleNext}
-                  className="bg-[#006d2c] hover:bg-[#006d2c] text-black font-medium h-12 px-8"
+                  className="bg-[#006d2c] hover:bg-[#005523] text-white font-medium h-12 px-8"
                 >
                   Next
                 </Button>
@@ -538,7 +516,7 @@ const StudentOnboarding = () => {
                 <Button
                   onClick={handleComplete}
                   disabled={loading}
-                  className="bg-[#006d2c] hover:bg-[#006d2c] text-black font-medium h-12 px-8"
+                  className="bg-[#006d2c] hover:bg-[#005523] text-white font-medium h-12 px-8"
                 >
                   {loading ? "Saving..." : "Complete"}
                 </Button>

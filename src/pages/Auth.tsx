@@ -24,19 +24,35 @@ const Auth = () => {
     const password = formData.get("password") as string;
 
     try {
+      console.log("Starting sign in process...");
+      console.log("Email:", email);
+
+      // Try to delete any existing session first
+      try {
+        await account.deleteSession('current');
+        console.log("Cleared existing session");
+      } catch (e) {
+        // No existing session, that's fine
+      }
+
       // Sign in with Appwrite
+      console.log("Creating session...");
       await account.createEmailPasswordSession(email, password);
+      console.log("Session created successfully");
 
       // Get user account
       const user = await account.get();
+      console.log("User fetched:", user.$id);
 
       // Fetch profile
       try {
+        console.log("Fetching profile...");
         const profile = await databases.getDocument(
           DATABASE_ID,
           COLLECTIONS.profiles,
           user.$id
         );
+        console.log("Profile fetched:", profile.role);
 
         // Check if onboarding is completed
         if (!profile.onboarding_completed) {
@@ -49,12 +65,25 @@ const Auth = () => {
         navigate(profile.role === "teacher" ? "/teacher/dashboard" : "/student/dashboard");
       } catch (profileError: any) {
         console.error("Profile fetch error:", profileError);
-        toast.error(t('login.errorLoadingProfile'));
+        console.error("Profile error code:", profileError.code);
+
+        // If profile doesn't exist, redirect to onboarding
+        if (profileError.code === 404) {
+          toast.info("Please complete your profile setup");
+          navigate("/onboarding");
+        } else {
+          toast.error(t('login.errorLoadingProfile') || "Error loading profile");
+        }
       }
     } catch (error: any) {
       console.error("Signin error:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+
       if (error.message?.includes("Invalid credentials") || error.code === 401) {
-        toast.error(t('login.invalidCredentials'));
+        toast.error(t('login.invalidCredentials') || "Invalid email or password");
+      } else if (error.message?.includes("user not found") || error.code === 404) {
+        toast.error("No account found with this email. Please sign up first.");
       } else {
         toast.error(error.message || "An error occurred during sign in");
       }

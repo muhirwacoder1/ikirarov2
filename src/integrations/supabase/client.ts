@@ -210,10 +210,36 @@ function createQueryBuilder(table: string, operation: string, columns?: string) 
     },
     then: async (resolve: (result: any) => void, reject?: (error: any) => void) => {
       try {
+        // Check if we're querying by 'id' - use getDocument instead
+        const idQuery = queries.find(q => q.startsWith('eq:id:'));
+        if (idQuery && isSingle) {
+          const documentId = idQuery.split(':')[2];
+          try {
+            const doc = await databases.getDocument(DATABASE_ID, collectionId, documentId);
+            resolve({ data: { ...doc, id: doc.$id }, error: null });
+          } catch (e: any) {
+            if (e.code === 404) {
+              resolve({ data: null, error: null });
+            } else {
+              resolve({ data: null, error: e });
+            }
+          }
+          return;
+        }
+
         const appwriteQueries: string[] = [];
 
         queries.forEach(q => {
-          const [op, col, val] = q.split(':');
+          const parts = q.split(':');
+          const op = parts[0];
+          let col = parts[1];
+          const val = parts.slice(2).join(':'); // Handle values that might contain colons
+
+          // Convert 'id' to '$id' for Appwrite
+          if (col === 'id') {
+            col = '$id';
+          }
+
           switch (op) {
             case 'eq':
               appwriteQueries.push(Query.equal(col, val));
@@ -237,10 +263,14 @@ function createQueryBuilder(table: string, operation: string, columns?: string) 
               appwriteQueries.push(Query.equal(col, JSON.parse(val)));
               break;
             case 'order':
+              // Convert common Supabase column names
+              let orderCol = col;
+              if (orderCol === 'created_at') orderCol = '$createdAt';
+              if (orderCol === 'updated_at') orderCol = '$updatedAt';
               if (val === 'asc') {
-                appwriteQueries.push(Query.orderAsc(col));
+                appwriteQueries.push(Query.orderAsc(orderCol));
               } else {
-                appwriteQueries.push(Query.orderDesc(col));
+                appwriteQueries.push(Query.orderDesc(orderCol));
               }
               break;
           }
@@ -299,18 +329,33 @@ function createMutationBuilder(table: string, operation: string, data?: any, opt
 
           case 'update':
             if (filterColumn && filterValue) {
-              // Find documents matching filter and update them
-              const existing = await databases.listDocuments(DATABASE_ID, collectionId, [
-                Query.equal(filterColumn, filterValue)
-              ]);
-              if (existing.documents.length > 0) {
-                const updated = await databases.updateDocument(
-                  DATABASE_ID,
-                  collectionId,
-                  existing.documents[0].$id,
-                  data
-                );
-                result = { ...updated, id: updated.$id };
+              // If filtering by 'id', use updateDocument directly
+              if (filterColumn === 'id') {
+                try {
+                  const updated = await databases.updateDocument(
+                    DATABASE_ID,
+                    collectionId,
+                    filterValue,
+                    data
+                  );
+                  result = { ...updated, id: updated.$id };
+                } catch (e) {
+                  throw e;
+                }
+              } else {
+                // Find documents matching filter and update them
+                const existing = await databases.listDocuments(DATABASE_ID, collectionId, [
+                  Query.equal(filterColumn, filterValue)
+                ]);
+                if (existing.documents.length > 0) {
+                  const updated = await databases.updateDocument(
+                    DATABASE_ID,
+                    collectionId,
+                    existing.documents[0].$id,
+                    data
+                  );
+                  result = { ...updated, id: updated.$id };
+                }
               }
             }
             break;

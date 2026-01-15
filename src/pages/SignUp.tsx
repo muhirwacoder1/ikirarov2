@@ -74,30 +74,51 @@ const SignUp = () => {
         setLoading(true);
 
         try {
+            console.log("Starting signup process...");
+            console.log("Email:", formData.email);
+            console.log("Role:", selectedRole);
+
+            // First, check if user already exists by trying to create session
+            try {
+                // Try to delete any existing session first
+                await account.deleteSession('current');
+            } catch (e) {
+                // No session exists, that's fine
+            }
+
             // Create user account in Appwrite
+            console.log("Creating Appwrite account...");
             const user = await account.create(
                 ID.unique(),
                 formData.email,
                 formData.password,
                 formData.fullName
             );
+            console.log("Account created:", user.$id);
 
             // Create session (log in the user)
+            console.log("Creating session...");
             await account.createEmailPasswordSession(formData.email, formData.password);
+            console.log("Session created successfully");
 
             // Create profile in database
+            console.log("Creating profile document...");
+            const profileData = {
+                full_name: formData.fullName,
+                email: formData.email,
+                role: selectedRole,
+                onboarding_completed: false,
+                teacher_approved: selectedRole === "student",
+            };
+            console.log("Profile data:", profileData);
+
             await databases.createDocument(
                 DATABASE_ID,
                 COLLECTIONS.profiles,
                 user.$id,
-                {
-                    full_name: formData.fullName,
-                    email: formData.email,
-                    role: selectedRole,
-                    onboarding_completed: false,
-                    teacher_approved: selectedRole === "student",
-                }
+                profileData
             );
+            console.log("Profile created successfully");
 
             toast.success(t('signup.accountCreated') || "Account created successfully!");
 
@@ -108,9 +129,16 @@ const SignUp = () => {
             }
         } catch (error: any) {
             console.error("Signup error:", error);
+            console.error("Error code:", error.code);
+            console.error("Error message:", error.message);
+            console.error("Error type:", error.type);
 
             if (error.code === 409 || error.message?.includes("already exists")) {
                 toast.error(t('signup.emailAlreadyExists') || "An account with this email already exists");
+            } else if (error.code === 401) {
+                toast.error("Authentication error. Please try again.");
+            } else if (error.message?.includes("Creation of a session is prohibited")) {
+                toast.error("You already have an active session. Please sign out first.");
             } else {
                 toast.error(error.message || t('signup.signupFailed') || "Failed to create account");
             }
@@ -256,8 +284,8 @@ const SignUp = () => {
                     <div className="space-y-1">
                         <div className="flex items-center gap-3 mb-2">
                             <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${selectedRole === "student"
-                                    ? "bg-gradient-to-br from-blue-500 to-purple-600"
-                                    : "bg-gradient-to-br from-emerald-500 to-teal-600"
+                                ? "bg-gradient-to-br from-blue-500 to-purple-600"
+                                : "bg-gradient-to-br from-emerald-500 to-teal-600"
                                 }`}>
                                 {selectedRole === "student" ? (
                                     <GraduationCap className="h-5 w-5 text-white" />

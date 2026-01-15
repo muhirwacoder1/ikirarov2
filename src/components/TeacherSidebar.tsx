@@ -1,0 +1,135 @@
+import { useEffect, useState } from "react";
+import { Home, Calendar, BookOpen, GraduationCap, Users, FileText, Award, Settings, Megaphone } from "lucide-react";
+import { NavLink } from "react-router-dom";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { databases, DATABASE_ID, COLLECTIONS, Query } from "@/integrations/appwrite/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useTranslation } from 'react-i18next';
+
+const mainMenuItems = [
+  { titleKey: "nav.dashboard", url: "/teacher/dashboard", icon: Home },
+  { titleKey: "nav.students", url: "/teacher/students", icon: Users },
+  { titleKey: "nav.assignments", url: "/teacher/assignments", icon: FileText },
+  { titleKey: "nav.grades", url: "/teacher/grades", icon: Award },
+  { titleKey: "nav.schedule", url: "/teacher/schedule", icon: Calendar },
+  { titleKey: "dashboard.announcements", url: "/teacher/announcements", icon: Megaphone },
+  { titleKey: "nav.settings", url: "/teacher/settings", icon: Settings },
+];
+
+export function TeacherSidebar() {
+  const { state } = useSidebar();
+  const { user } = useAuth();
+  const { t } = useTranslation();
+  const collapsed = state === "collapsed";
+  const [courses, setCourses] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      fetchTeacherCourses();
+    }
+  }, [user]);
+
+  const fetchTeacherCourses = async () => {
+    if (!user) return;
+
+    try {
+      const response = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.courses,
+        [
+          Query.equal('teacher_id', user.$id),
+          Query.orderDesc('$createdAt'),
+          Query.limit(10)
+        ]
+      );
+      setCourses(response.documents || []);
+    } catch (error) {
+      console.error("Error fetching courses:", error);
+      setCourses([]);
+    }
+  };
+
+  return (
+    <Sidebar collapsible="icon" className="m-4">
+      <div className="h-full bg-[#133223] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+        <SidebarContent className="bg-transparent flex-1">
+          <SidebarGroup className="space-y-1">
+            <div className="flex items-center gap-2 px-4 py-4">
+              <GraduationCap className="h-7 w-7 text-[#006d2c]" />
+              {!collapsed && <span className="text-lg font-bold text-white">DataPlus Learning</span>}
+            </div>
+            <SidebarGroupContent className="px-2">
+              <SidebarMenu className="space-y-1">
+                {mainMenuItems.map((item) => (
+                  <SidebarMenuItem key={item.titleKey}>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={item.url}
+                        className={({ isActive }) =>
+                          isActive
+                            ? "bg-[#006d2c] text-white font-medium rounded-xl px-3 py-2.5 flex items-center gap-3"
+                            : "text-gray-300 hover:bg-white/10 hover:text-white rounded-xl px-3 py-2.5 flex items-center gap-3"
+                        }
+                      >
+                        <item.icon className="h-5 w-5 flex-shrink-0" />
+                        {!collapsed && <span className="text-sm">{t(item.titleKey)}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          {/* My Courses Section */}
+          {!collapsed && (
+            <SidebarGroup className="mt-4 space-y-1">
+              <SidebarGroupLabel className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                {t('nav.myCourses').toUpperCase()}
+              </SidebarGroupLabel>
+              <SidebarGroupContent className="px-2">
+                {courses.length > 0 ? (
+                  <SidebarMenu className="space-y-1">
+                    {courses.map((course) => (
+                      <SidebarMenuItem key={course.$id}>
+                        <SidebarMenuButton asChild>
+                          <NavLink
+                            to={`/course/${course.$id}`}
+                            className={({ isActive }) =>
+                              isActive
+                                ? "bg-[#006d2c] text-white font-medium rounded-xl px-3 py-2 flex items-center gap-3"
+                                : "text-gray-300 hover:bg-white/10 hover:text-white rounded-xl px-3 py-2 flex items-center gap-3"
+                            }
+                          >
+                            <BookOpen className="h-4 w-4 flex-shrink-0" />
+                            <span className="truncate text-sm">{course.title}</span>
+                          </NavLink>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                ) : (
+                  <div className="px-3 py-4 text-center">
+                    <BookOpen className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+                    <p className="text-xs text-gray-400">{t('teacher.dashboard.noCourses')}</p>
+                    <p className="text-xs text-gray-500 mt-1">{t('teacher.dashboard.createFirst')}</p>
+                  </div>
+                )}
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
+        </SidebarContent>
+      </div>
+    </Sidebar>
+  );
+}

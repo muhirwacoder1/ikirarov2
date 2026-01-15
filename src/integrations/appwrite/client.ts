@@ -33,6 +33,11 @@ export const COLLECTIONS = {
   quizzes: 'quizzes',
   quiz_questions: 'quiz_questions',
   quiz_attempts: 'quiz_attempts',
+  // New collections for course content
+  course_chapters: 'course_chapters',
+  course_lessons: 'course_lessons',
+  capstone_projects: 'capstone_projects',
+  lesson_quiz_questions: 'lesson_quiz_questions',
 };
 
 // Re-export Query and ID for convenience

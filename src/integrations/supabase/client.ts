@@ -136,14 +136,17 @@ const getCollectionId = (table: string): string => {
     exhibition_projects: COLLECTIONS.exhibition_projects,
     testimonials: COLLECTIONS.testimonials,
     course_modules: COLLECTIONS.course_modules,
-    course_chapters: COLLECTIONS.course_modules,
     module_lessons: COLLECTIONS.module_lessons,
-    course_lessons: COLLECTIONS.module_lessons,
     partner_requests: COLLECTIONS.partner_requests,
     quizzes: COLLECTIONS.quizzes,
     quiz_questions: COLLECTIONS.quiz_questions,
     quiz_attempts: COLLECTIONS.quiz_attempts,
-    announcement_reads: 'announcement_reads', // May need to be created
+    // New course content collections
+    course_chapters: COLLECTIONS.course_chapters,
+    course_lessons: COLLECTIONS.course_lessons,
+    capstone_projects: COLLECTIONS.capstone_projects,
+    lesson_quiz_questions: COLLECTIONS.lesson_quiz_questions,
+    announcement_reads: 'announcement_reads',
   };
   return mapping[table] || table;
 };

@@ -8,9 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Plus, Trash2, ChevronDown, ChevronRight, ArrowLeft, 
-  BookOpen, Layers, Award, Save, Video, FileText, 
+import {
+  Plus, Trash2, ChevronDown, ChevronRight, ArrowLeft,
+  BookOpen, Layers, Award, Save, Video, FileText,
   Link2, HelpCircle, ClipboardList, GripVertical, Check,
   Eye, X, Play, Clock, Globe, Users, Target
 } from "lucide-react";
@@ -66,7 +66,7 @@ export default function CreateCourse() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [courseId, setCourseId] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState(0);
-  
+
   const [courseData, setCourseData] = useState({
     title: "",
     description: "",
@@ -76,7 +76,7 @@ export default function CreateCourse() {
     level: "beginner",
     language: "",
   });
-  
+
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [openChapters, setOpenChapters] = useState<Set<number>>(new Set([0]));
   const [capstoneProject, setCapstoneProject] = useState({
@@ -107,7 +107,7 @@ export default function CreateCourse() {
   const fetchCourseData = async (id: string) => {
     try {
       setInitialLoading(true);
-      
+
       const { data: course, error: courseError } = await supabase
         .from("courses")
         .select("*")
@@ -330,27 +330,47 @@ export default function CreateCourse() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
+      // Only include fields that exist in the Appwrite courses schema
+      const coursePayload: Record<string, any> = {
+        title: courseData.title,
+        description: courseData.description,
+        level: courseData.level,
+        is_published: false,
+      };
+
+      // Only add thumbnail_url if it's a valid URL
+      if (courseData.thumbnail_url) {
+        let thumbnailUrl = courseData.thumbnail_url;
+        if (!thumbnailUrl.startsWith('http')) {
+          thumbnailUrl = `${window.location.origin}${thumbnailUrl}`;
+        }
+        coursePayload.thumbnail_url = thumbnailUrl;
+      }
+
+      // Add category if we have language
+      if (courseData.language) {
+        coursePayload.category = courseData.language;
+      }
+
+      console.log("Course payload:", coursePayload);
+
       let course: any;
 
       if (isEditMode && courseId) {
         const { data: updatedCourse, error: courseError } = await supabase
           .from("courses")
-          .update({
-            title: courseData.title,
-            description: courseData.description,
-            requirements: courseData.requirements,
-            thumbnail_url: courseData.thumbnail_url,
-            welcome_video_url: courseData.welcome_video_url,
-            level: courseData.level,
-            language: courseData.language,
-          })
+          .update(coursePayload)
           .eq("id", courseId)
           .select()
           .single();
 
-        if (courseError) throw courseError;
+        if (courseError) {
+          console.error("Update error:", courseError);
+          throw courseError;
+        }
         course = updatedCourse;
 
+        // Delete existing chapters and lessons for update
         const { data: existingChapters } = await supabase
           .from("course_chapters")
           .select("id")
@@ -364,85 +384,127 @@ export default function CreateCourse() {
         }
         await supabase.from("capstone_projects").delete().eq("course_id", courseId);
       } else {
+        // Add teacher_id for new courses
+        coursePayload.teacher_id = user.id;
+
         const { data: newCourse, error: courseError } = await supabase
           .from("courses")
+          .insert(coursePayload)
+          .select()
+          .single();
+
+        if (courseError) {
+          console.error("Insert error:", courseError);
+          throw courseError;
+        }
+        course = newCourse;
+      }
+
+      console.log("Course saved:", course);
+
+      // Save chapters and lessons
+      for (const chapter of chapters) {
+        const { data: chapterData, error: chapterError } = await supabase
+          .from("course_chapters")
           .insert({
-            title: courseData.title,
-            description: courseData.description,
-            requirements: courseData.requirements,
-            thumbnail_url: courseData.thumbnail_url,
-            welcome_video_url: courseData.welcome_video_url,
-            level: courseData.level,
-            language: courseData.language,
-            teacher_id: user.id,
+            course_id: course.id,
+            title: chapter.title,
+            order_index: chapter.order_index
           })
           .select()
           .single();
 
-        if (courseError) throw courseError;
-        course = newCourse;
-      }
+        if (chapterError) {
+          console.error("Chapter error:", chapterError);
+          throw chapterError;
+        }
 
-      // Create chapters and lessons
-      for (const chapter of chapters) {
-        const { data: chapterData, error: chapterError } = await supabase
-          .from("course_chapters")
-          .insert({ course_id: course.id, title: chapter.title, order_index: chapter.order_index })
-          .select()
-          .single();
-
-        if (chapterError) throw chapterError;
+        console.log("Chapter saved:", chapterData);
 
         for (const lesson of chapter.lessons) {
+          const lessonPayload: Record<string, any> = {
+            chapter_id: chapterData.id,
+            title: lesson.title,
+            description: lesson.description || "",
+            content_type: lesson.content_type,
+            order_index: lesson.order_index,
+            is_mandatory: lesson.is_mandatory || false,
+          };
+
+          // Only add content_url if not a quiz
+          if (lesson.content_type !== "quiz" && lesson.content_url) {
+            lessonPayload.content_url = lesson.content_url;
+          }
+
+          // Add file_url if present
+          if (lesson.file_url) {
+            lessonPayload.file_url = lesson.file_url;
+          }
+
+          // Add duration if present
+          if (lesson.duration) {
+            lessonPayload.duration = lesson.duration;
+          }
+
           const { data: lessonData, error: lessonError } = await supabase
             .from("course_lessons")
-            .insert({
-              chapter_id: chapterData.id,
-              title: lesson.title,
-              description: lesson.description,
-              content_type: lesson.content_type,
-              content_url: lesson.content_type === "quiz" ? "" : lesson.content_url,
-              file_url: lesson.file_url || null,
-              duration: lesson.duration,
-              order_index: lesson.order_index,
-              is_mandatory: lesson.is_mandatory || false,
-            })
+            .insert(lessonPayload)
             .select()
             .single();
 
-          if (lessonError) throw lessonError;
+          if (lessonError) {
+            console.error("Lesson error:", lessonError);
+            throw lessonError;
+          }
 
+          console.log("Lesson saved:", lessonData);
+
+          // Save quiz questions if applicable
           if (lesson.content_type === "quiz" && lesson.quiz_questions?.length) {
-            const questionsToInsert = lesson.quiz_questions.map((q, idx) => ({
-              lesson_id: lessonData.id,
-              question_text: q.question_text,
-              options: q.options,
-              correct_answer: q.correct_answer,
-              explanation: q.explanation,
-              order_index: idx,
-              points: q.points,
-            }));
-            await supabase.from("lesson_quiz_questions").insert(questionsToInsert);
+            for (let idx = 0; idx < lesson.quiz_questions.length; idx++) {
+              const q = lesson.quiz_questions[idx];
+              const { error: questionError } = await supabase
+                .from("lesson_quiz_questions")
+                .insert({
+                  lesson_id: lessonData.id,
+                  question_text: q.question_text,
+                  correct_answer: q.correct_answer,
+                  explanation: q.explanation || "",
+                  order_index: idx,
+                  points: q.points || 1,
+                });
+
+              if (questionError) {
+                console.error("Question error:", questionError);
+              }
+            }
           }
         }
       }
 
+      // Save capstone project if included
       if (includeCapstone && capstoneProject.title.trim()) {
-        await supabase.from("capstone_projects").insert({
-          course_id: course.id,
-          title: capstoneProject.title,
-          description: capstoneProject.description,
-          instructions: capstoneProject.instructions,
-          requirements: capstoneProject.requirements.filter(r => r.trim()),
-          due_date: capstoneProject.due_date || null,
-        });
+        const { error: capstoneError } = await supabase
+          .from("capstone_projects")
+          .insert({
+            course_id: course.id,
+            title: capstoneProject.title,
+            description: capstoneProject.description || "",
+            instructions: capstoneProject.instructions || "",
+            due_date: capstoneProject.due_date || null,
+          });
+
+        if (capstoneError) {
+          console.error("Capstone error:", capstoneError);
+        }
       }
 
       toast({ title: "Success!", description: isEditMode ? "Course updated" : "Course created" });
       navigate("/teacher/dashboard");
-    } catch (error) {
-      console.error("Error:", error);
-      toast({ title: "Error", description: "Failed to save course", variant: "destructive" });
+    } catch (error: any) {
+      console.error("Error saving course:", error);
+      console.error("Error details:", error.message, error.code);
+      toast({ title: "Error", description: error.message || "Failed to save course", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -518,17 +580,15 @@ export default function CreateCourse() {
                 <button
                   key={step.title}
                   onClick={() => setActiveStep(index)}
-                  className={`flex items-center gap-2 px-6 py-4 border-b-2 transition-colors ${
-                    isActive 
-                      ? "border-[#006d2c] text-[#006d2c]" 
-                      : isCompleted 
-                        ? "border-transparent text-gray-600 hover:text-gray-900" 
-                        : "border-transparent text-gray-400"
-                  }`}
+                  className={`flex items-center gap-2 px-6 py-4 border-b-2 transition-colors ${isActive
+                    ? "border-[#006d2c] text-[#006d2c]"
+                    : isCompleted
+                      ? "border-transparent text-gray-600 hover:text-gray-900"
+                      : "border-transparent text-gray-400"
+                    }`}
                 >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                    isActive ? "bg-[#006d2c] text-white" : isCompleted ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
-                  }`}>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${isActive ? "bg-[#006d2c] text-white" : isCompleted ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+                    }`}>
                     {isCompleted ? <Check className="h-3 w-3" /> : index + 1}
                   </div>
                   <Icon className="h-4 w-4" />
@@ -1208,9 +1268,9 @@ export default function CreateCourse() {
                   <Card>
                     <CardContent className="p-0">
                       {courseData.thumbnail_url ? (
-                        <img 
-                          src={courseData.thumbnail_url} 
-                          alt="Course thumbnail" 
+                        <img
+                          src={courseData.thumbnail_url}
+                          alt="Course thumbnail"
                           className="w-full aspect-video object-cover rounded-t-lg"
                         />
                       ) : (

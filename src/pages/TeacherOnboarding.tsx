@@ -58,7 +58,7 @@ const TeacherOnboarding = () => {
       if (error || !profile) {
         console.log("Profile not found, waiting for creation...");
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         const { data: retryProfile } = await supabase
           .from("profiles")
           .select("role, onboarding_completed")
@@ -76,11 +76,7 @@ const TeacherOnboarding = () => {
 
         // Use the retry profile for checks
         if (retryProfile.onboarding_completed) {
-          if (retryProfile.role === "teacher") {
-            navigate("/teacher/pending-approval", { replace: true });
-          } else {
-            navigate("/student/dashboard", { replace: true });
-          }
+          navigate(retryProfile.role === "teacher" ? "/teacher/dashboard" : "/student/dashboard", { replace: true });
           return;
         }
 
@@ -98,11 +94,7 @@ const TeacherOnboarding = () => {
 
       // If already completed onboarding, redirect appropriately
       if (profile.onboarding_completed) {
-        if (profile.role === "teacher") {
-          navigate("/teacher/pending-approval", { replace: true });
-        } else {
-          navigate("/student/dashboard", { replace: true });
-        }
+        navigate(profile.role === "teacher" ? "/teacher/dashboard" : "/student/dashboard", { replace: true });
         return;
       }
 
@@ -150,16 +142,31 @@ const TeacherOnboarding = () => {
         return;
       }
 
+      // Convert relative avatar path to full URL
+      let avatarUrl = formData.avatar;
+      if (avatarUrl && !avatarUrl.startsWith('http')) {
+        avatarUrl = `${window.location.origin}${avatarUrl}`;
+      }
+
+      // Only include fields that exist in Appwrite schema
+      const updateData: Record<string, any> = {
+        full_name: `${formData.firstName} ${formData.lastName}`,
+        phone: formData.telephone,
+        onboarding_completed: true,
+        teacher_approved: true, // Auto-approve teachers since there's no admin portal
+      };
+
+      // Only add avatar_url if it's a valid URL
+      if (avatarUrl && avatarUrl.startsWith('http')) {
+        updateData.avatar_url = avatarUrl;
+      }
+
+      console.log("Updating profile with:", updateData);
+
       // Update user profile with onboarding data
       const { error: profileError } = await supabase
         .from("profiles")
-        .update({
-          full_name: `${formData.firstName} ${formData.lastName}`,
-          email: formData.email,
-          avatar_url: formData.avatar,
-          phone: formData.telephone,
-          onboarding_completed: true,
-        })
+        .update(updateData)
         .eq("id", user.id);
 
       if (profileError) throw profileError;
@@ -180,8 +187,8 @@ const TeacherOnboarding = () => {
         throw new Error("Onboarding update failed");
       }
 
-      toast.success("Profile setup completed! Your account is pending admin approval.");
-      navigate("/teacher/pending-approval", { replace: true });
+      toast.success("Profile setup completed! Welcome to your dashboard.");
+      navigate("/teacher/dashboard", { replace: true });
     } catch (error: any) {
       console.error("Error completing onboarding:", error);
       toast.error("Failed to complete profile setup. Please try again.");
@@ -299,11 +306,10 @@ const TeacherOnboarding = () => {
                       key={index}
                       type="button"
                       onClick={() => setFormData({ ...formData, avatar })}
-                      className={`relative rounded-full overflow-hidden border-4 transition-all hover:scale-110 ${
-                        formData.avatar === avatar
-                          ? "border-[#006d2c] ring-4 ring-[#006d2c]/30"
-                          : "border-gray-200 hover:border-[#006d2c]/50"
-                      }`}
+                      className={`relative rounded-full overflow-hidden border-4 transition-all hover:scale-110 ${formData.avatar === avatar
+                        ? "border-[#006d2c] ring-4 ring-[#006d2c]/30"
+                        : "border-gray-200 hover:border-[#006d2c]/50"
+                        }`}
                     >
                       <img
                         src={avatar}
